@@ -14,14 +14,18 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/ResistanceTo/MiniWatts.git source
 
-      - name: Patch widget
+      - name: Patch widget and Vietnamese UI
         working-directory: source
         shell: python3 {0}
         run: |
           from pathlib import Path
+          import json
           import re
 
-          # Add temperature values to the widget reading
+          # ============================================================
+          # 1. Add temperature values to ChargeReading
+          # ============================================================
+
           p = Path("MiniWatts/Shared/ChargeReading.swift")
           s = p.read_text()
 
@@ -45,7 +49,10 @@ jobs:
 
           p.write_text(s)
 
-          # Replace the existing Medium widget
+          # ============================================================
+          # 2. Replace Medium Home Screen widget
+          # ============================================================
+
           p = Path("Widget/BatteryWidget.swift")
           s = p.read_text()
 
@@ -141,7 +148,7 @@ jobs:
                                   .fill(tint)
                                   .frame(width: 6, height: 6)
 
-                              Text("TRỰC TIẾP")
+                              Text("Cập nhật")
 
                               Text("·")
 
@@ -216,6 +223,106 @@ jobs:
               raise SystemExit("Không tìm thấy MediumBatteryView")
 
           p.write_text(result)
+
+          # ============================================================
+          # 3. Vietnamese localization
+          #    Áp dụng cho cả App và Widget / Lock Screen
+          # ============================================================
+
+          translations = {
+              "Battery": "Pin",
+              "Battery cell": "Cell pin",
+              "Battery pack voltage": "Điện áp bộ pin",
+              "Battery rail voltage": "Điện áp đường pin",
+              "Camera": "Camera",
+              "Charge IC": "IC sạc",
+              "Charge IC die": "Nhiệt độ lõi IC sạc",
+              "Charge IC junction": "Nhiệt độ mối nối IC sạc",
+              "Charge power": "Công suất sạc",
+              "Charge power and level, read from sensors": "Công suất sạc và mức pin, đọc từ cảm biến",
+              "Charging": "Đang sạc",
+              "Charging on hold": "Tạm dừng sạc",
+              "Chassis": "Khung máy",
+              "Current into battery": "Dòng vào pin",
+              "Display": "Màn hình",
+              "drawn from battery": "Đang dùng pin",
+              "Finishing charge": "Đang hoàn tất sạc",
+              "From app %@": "Từ ứng dụng %@",
+              "at charging coil": "tại cuộn sạc",
+              "at phone port": "tại cổng điện thoại",
+              "Full": "Đầy",
+              "into battery": "vào pin",
+              "Last charge": "Lần sạc gần nhất",
+              "Manufacturer": "Nhà sản xuất",
+              "Model": "Mẫu máy",
+              "Name": "Tên",
+              "No reading": "Không có dữ liệu",
+              "On battery": "Dùng pin",
+              "Open MiniWatts once to resume": "Mở MiniWatts một lần để tiếp tục",
+              "Other sensors": "Cảm biến khác",
+              "Paused — open MiniWatts to resume": "Tạm dừng — mở MiniWatts để tiếp tục",
+              "Plugged in, not charging": "Đã cắm nguồn, không sạc",
+              "Radios": "Kết nối vô tuyến",
+              "Since %@": "Từ %@",
+              "SoC dies": "Chip SoC",
+              "Source": "Nguồn",
+              "Storage": "Bộ nhớ",
+              "Updated %@": "Cập nhật %@",
+              "USB-C": "USB-C",
+              "USB-C input current": "Dòng vào USB-C",
+              "USB-C input voltage": "Điện áp vào USB-C",
+              "Watts": "Công suất",
+              "Wireless": "Không dây",
+              "Wireless coil": "Cuộn sạc không dây",
+              "Wireless input current": "Dòng vào không dây",
+              "Wireless input voltage": "Điện áp vào không dây",
+
+              "Charging power": "Công suất sạc",
+              "SoC temperature": "Nhiệt độ SoC",
+              "Battery temperature": "Nhiệt độ pin",
+              "Hottest component": "Thành phần nóng nhất",
+              "Power": "Công suất",
+              "SoC": "SoC",
+              "Hottest": "Nóng nhất",
+              "End": "Kết thúc",
+              "End Live Activity": "Kết thúc hoạt động trực tiếp"
+          }
+
+          catalogs = [
+              Path("MiniWatts/Localizable.xcstrings"),
+              Path("Widget/Localizable.xcstrings")
+          ]
+
+          for catalog in catalogs:
+              if not catalog.exists():
+                  print(f"Không tìm thấy: {catalog}")
+                  continue
+
+              data = json.loads(catalog.read_text())
+
+              strings = data.get("strings", {})
+
+              for key, item in strings.items():
+                  localizations = item.setdefault("localizations", {})
+
+                  # Thêm tiếng Việt cho các chuỗi đã xác định
+                  if key in translations:
+                      localizations["vi"] = {
+                          "stringUnit": {
+                              "state": "translated",
+                              "value": translations[key]
+                          }
+                      }
+
+                  # Không cho bản Trung giản thể xuất hiện trong bản build này.
+                  # Những chuỗi chưa dịch sẽ fallback về tiếng Anh thay vì tiếng Trung.
+                  localizations.pop("zh-Hans", None)
+
+              catalog.write_text(
+                  json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+              )
+
+              print(f"Đã patch: {catalog}")
 
       - name: Build IPA
         working-directory: source

@@ -1,0 +1,231 @@
+name: Build MiniWatts Vietnamese Widget
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    steps:
+      - name: Get MiniWatts source
+        run: |
+          git clone --depth 1 https://github.com/ResistanceTo/MiniWatts.git source
+
+      - name: Patch widget
+        working-directory: source
+        shell: python3 {0}
+        run: |
+          from pathlib import Path
+          import re
+
+          # Add temperature values to the widget reading
+          p = Path("MiniWatts/Shared/ChargeReading.swift")
+          s = p.read_text()
+
+          s = s.replace(
+              "var batteryTemperature: Double?",
+              """var batteryTemperature: Double?
+              var socTemperature: Double?
+              var chargerTemperature: Double?
+              var hottestTemperature: Double?
+              var hottestSensorName: String?"""
+          )
+
+          s = s.replace(
+              "batteryTemperature = snapshot.batteryTemperature",
+              """batteryTemperature = snapshot.batteryTemperature
+              socTemperature = snapshot.temperaturesByZone.first(where: { $0.zone == .soc })?.representative
+              chargerTemperature = snapshot.temperaturesByZone.first(where: { $0.zone == .charger })?.representative
+              hottestTemperature = snapshot.hottestSensor?.value
+              hottestSensorName = snapshot.hottestSensor?.name"""
+          )
+
+          p.write_text(s)
+
+          # Replace the existing Medium widget
+          p = Path("Widget/BatteryWidget.swift")
+          s = p.read_text()
+
+          new_view = r'''
+          struct MediumBatteryView: View {
+              let entry: BatteryEntry
+              let palette: WidgetPalette
+
+              var body: some View {
+                  if let reading = entry.reading {
+                      let tint = palette.tint(for: reading)
+
+                      VStack(spacing: 8) {
+
+                          HStack {
+                              HStack(spacing: 5) {
+                                  Image(systemName: "bolt.fill")
+                                      .font(.system(size: 13, weight: .bold))
+                                      .foregroundStyle(tint)
+
+                                  Text("Công suất sạc")
+                                      .font(.system(size: 14, weight: .semibold))
+                                      .foregroundStyle(tint)
+                              }
+
+                              Spacer()
+
+                              HStack(spacing: 4) {
+                                  Image(systemName: "battery.100percent")
+                                      .foregroundStyle(.green)
+
+                                  Text(reading.percent.map { "\($0)%" } ?? "—")
+                                      .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                      .monospacedDigit()
+                                      .foregroundStyle(.green)
+                              }
+                          }
+
+                          HStack(alignment: .firstTextBaseline, spacing: 3) {
+                              if let watts = reading.watts {
+                                  Text(Formatting.watts(watts))
+                                      .font(.system(size: 32, weight: .semibold, design: .rounded))
+                                      .monospacedDigit()
+                                      .foregroundStyle(.white)
+                              } else {
+                                  Text("—")
+                                      .font(.system(size: 32, weight: .semibold, design: .rounded))
+                                      .foregroundStyle(.white)
+                              }
+
+                              Text("W")
+                                  .font(.system(size: 14, weight: .medium, design: .rounded))
+                                  .foregroundStyle(palette.muted)
+                          }
+                          .frame(maxWidth: .infinity, alignment: .leading)
+
+                          HStack(spacing: 7) {
+                              MetricBox(
+                                  title: "SoC",
+                                  value: reading.socTemperature,
+                                  icon: "cpu",
+                                  iconColor: .orange,
+                                  palette: palette
+                              )
+
+                              MetricBox(
+                                  title: "Pin",
+                                  value: reading.batteryTemperature,
+                                  icon: "battery.100percent",
+                                  iconColor: .yellow,
+                                  palette: palette
+                              )
+
+                              MetricBox(
+                                  title: "Bộ sạc",
+                                  value: reading.chargerTemperature,
+                                  icon: "powerplug.fill",
+                                  iconColor: .orange,
+                                  palette: palette
+                              )
+
+                              MetricBox(
+                                  title: "Nóng nhất",
+                                  value: reading.hottestTemperature,
+                                  icon: "thermometer.high",
+                                  iconColor: .red,
+                                  palette: palette
+                              )
+                          }
+
+                          HStack(spacing: 5) {
+                              Circle()
+                                  .fill(tint)
+                                  .frame(width: 6, height: 6)
+
+                              Text("TRỰC TIẾP")
+
+                              Text("·")
+
+                              Text(reading.date, style: .time)
+
+                              Spacer()
+
+                              Text(reading.hottestSensorName ?? "")
+                                  .lineLimit(1)
+                          }
+                          .font(.system(size: 9, weight: .semibold))
+                          .foregroundStyle(palette.muted)
+                      }
+                  } else {
+                      NoReadingView(palette: palette)
+                  }
+              }
+          }
+
+          struct MetricBox: View {
+              let title: String
+              let value: Double?
+              let icon: String
+              let iconColor: Color
+              let palette: WidgetPalette
+
+              var body: some View {
+                  VStack(alignment: .leading, spacing: 3) {
+
+                      HStack(spacing: 3) {
+                          Image(systemName: icon)
+                              .font(.system(size: 9, weight: .semibold))
+                              .foregroundStyle(iconColor)
+
+                          Text(title)
+                              .font(.system(size: 9, weight: .semibold))
+                              .foregroundStyle(palette.muted)
+                              .lineLimit(1)
+                      }
+
+                      Text(value.map { Formatting.temperature($0) } ?? "—")
+                          .font(.system(size: 16, weight: .semibold, design: .rounded))
+                          .monospacedDigit()
+                          .foregroundStyle(.white)
+                          .minimumScaleFactor(0.7)
+                  }
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .padding(.horizontal, 7)
+                  .padding(.vertical, 6)
+                  .background(
+                      RoundedRectangle(cornerRadius: 9, style: .continuous)
+                          .fill(Color.white.opacity(0.06))
+                  )
+              }
+          }
+
+          '''
+
+          pattern = r"struct MediumBatteryView: View \{.*?\nstruct LastChargeSummary: View \{"
+
+          replacement = new_view + "struct LastChargeSummary: View {"
+
+          result, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.S
+          )
+
+          if count != 1:
+              raise SystemExit("Không tìm thấy MediumBatteryView")
+
+          p.write_text(result)
+
+      - name: Build IPA
+        working-directory: source
+        run: |
+          chmod +x scripts/build-ipa.sh
+          ./scripts/build-ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v6
+        with:
+          name: MiniWatts-Vietnamese-Widget
+          path: source/build/export/MiniWatts-unsigned.ipa
+          retention-days: 14
